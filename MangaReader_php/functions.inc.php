@@ -94,7 +94,10 @@ function createChapter($xml, $xml_root) {
 	return $xml_chapter;
 }
 
-/** Creates basic xml object */
+/** Creates basic xml object
+ * 
+ *  @return DOMDocument
+ *  */
 function createXML() {
 	$xml = new DOMDocument('1.0');
 	$xml->formatOutput = TRUE;
@@ -103,6 +106,12 @@ function createXML() {
 	return $xml;
 }
 
+/**
+ * Creates root node in XML object
+ * @param DOMDocument $xml
+ * 
+ * @return DOMElement
+ */
 function createXMLRoot($xml) {
 	// Create root xml node
 	$xml_root = $xml->createElement("root");
