@@ -8,8 +8,9 @@ $pattern_details = '<div id="series_details">.*<span>Authors:</span>(.*?)</div>.
 $pattern_big_about = '<span id="full_notes">(.*?)<a href="#';
 $pattern_ongoing = 'ongoing';
 $pattern_genres = '<a href="http://www.goodmanga.net/manga-genre/.*?">(.*?)</a>';
-$pattern_chapters = '<div id="chapters">.*?<h2>.*</h2>.*?<ul>.*?<li>.*?<a href="(.*?)">(.*?)</a>.*?</li>.*?</ul>';
 $pattern_next = '<li><a href="(.*?page=\d+)">Next</a></li>';
+//$pattern_chapter = '<div id="chapters">.*?<h2>.*</h2>.*?<ul>.*?<li>.*?<a href="(.*?)">(.*?)</a>.*?</li>.*?</ul>';
+$pattern_chapter = '#<a href="(.*?chapter.*?)">.*?\n[ ]*?([^ ].*?)[ ]*?</a>#';
 
 // Pages
 $pattern_page = '#<div id="manga_viewer">.*?<img src="(.*?/)\d\.jpg#s'; 

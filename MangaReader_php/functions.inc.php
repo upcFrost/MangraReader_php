@@ -1,8 +1,33 @@
 <?php
 require_once 'classes.inc.php';
 
+/** Global functions **/
+
+function downloadChapter($chapter, $xml, $xml_root) {
+	// Analyze page
+	$pageInfo = new imagePageInfo();
+	$pageInfo = analyzePage($chapter->chapterURL);
+	// Create image and xml objects
+	$combined = new Imagick();
+	// Create appended image
+	$bigImage = createBigImage($pageInfo->imageTempURL, 1,
+			$pageInfo->pageCount, $combined, $xml, $xml_root,
+			$chapter->chapterTitle);
+	// Write appended image to file
+	$bigImage->writeimage("C:\\Temp\\Done\\" . $chapter->chapterTitle . ".jpg");
+}
+
+
 /** Network functions **/
 
+/**
+ * Download web object using cURL
+ * 
+ * @param String $url <br>
+ * Page URL
+ * 
+ * @return mixed
+ */
 function getPage($url) {
 	$ch = curl_init($url);
 	$proxy = '10.100.120.37:3128';
@@ -23,6 +48,24 @@ function getPage($url) {
 
 /** Page analysis functions **/
 
+function analyzeTitlePage($titleURL) {
+	// Use patterns from regex.inc
+	global $pattern_chapter;
+	// Using array as a return var
+	$chaptersArray = array();
+	$content = getPage($titleURL);
+	if (preg_match_all($pattern_chapter, $content, $matches)) {
+		$length = count($matches[1]);
+		for ($i = 0; $i < $length; $i++) {
+			$chaptersArray[$i] = new chapterInfo();
+			$chaptersArray[$i]->chapterURL = $matches[1][$i];
+			$chaptersArray[$i]->chapterTitle = $matches[2][$i];
+		}
+	}
+	
+	return $chaptersArray;
+}
+
 function analyzePage($pageURL) {
 	// Use patterns from regex.inc
 	global $pattern_page;
@@ -42,6 +85,26 @@ function analyzePage($pageURL) {
 
 /** XML functions **/
 
+/**
+ * Write each image part dimensions into XML
+ * 
+ * @param DOMDocument $xml <br>
+ * Main XML object
+ * 
+ * @param Imagick $im <br>
+ * Imagick object with current image
+ * 
+ * @param Integer $page <br>
+ * Page number
+ * 
+ * @param Array['width','height'] $prevDim <br>
+ * Imagick dimensions array for current big image
+ * 
+ * @param DOMElement $xml_chapter <br>
+ * XML chapter node
+ * 
+ * @return Array['width','height']
+ */
 function writeDims($xml, $im, $page, $prevDim, $xml_chapter) {
 	// Grab geometry and offset (from prev geometry + prev offset)
 	$dim = $im->getImageGeometry();
@@ -80,14 +143,19 @@ function writeDims($xml, $im, $page, $prevDim, $xml_chapter) {
  * 
  * @param DOMDocument $xml <br>
  * Main xml object
+ * 
  * @param DOMElement $xml_root <br>
  * Xml root node
+ * 
+ * @param String $chapterName <br>
+ * Chapter title
+ * 
  * @return DOMElement
  */
-function createChapter($xml, $xml_root) {
+function createChapter($xml, $xml_root, $chapterName) {
 	// Add chapter and chapterId nodes
 	$xml_chapter = $xml->createElement("chapter");
-	$xml_chapter_id = $xml->createElement("chapter_id", 1);
+	$xml_chapter_id = $xml->createElement("chapter_id", $chapterName);
 	$xml_chapter->appendChild($xml_chapter_id);
 	$xml_root->appendChild($xml_chapter);
 	
@@ -108,6 +176,7 @@ function createXML() {
 
 /**
  * Creates root node in XML object
+ * 
  * @param DOMDocument $xml
  * 
  * @return DOMElement
@@ -121,7 +190,6 @@ function createXMLRoot($xml) {
 	return $xml_root;
 }
 
-
 /** Image grabber **/
 
 function grabImage($tempFile, $url, $handler) {
@@ -130,12 +198,11 @@ function grabImage($tempFile, $url, $handler) {
 }
 
 function createBigImage($urlTemp, $minIdx, $maxIdx,
-		$combined, $xml, $xml_root) {
+		$combined, $xml, $xml_root, $chapterName) {
 	$all = new Imagick();
-	$xml_chapter = createChapter($xml, $xml_root);
+	$xml_chapter = createChapter($xml, $xml_root, $chapterName);
 	$dim = ['width' => 0, 'height' => 0];
 	for ($i = $minIdx; $i < $maxIdx+1; $i++) {
-		echo "Dim width: " . $dim["width"];
 		// Make temp file
 		$tempFile = "c:\\Temp\\" . $i . ".jpg";
 		$handle = fopen($tempFile, 'w+');
