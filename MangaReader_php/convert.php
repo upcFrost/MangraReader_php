@@ -9,10 +9,8 @@ $OS = 'Windows';
 // $OS = 'Linux';
 
 if ($OS == 'Windows') {
-	$uploaddir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php
-			\\MangaReader_php\\upload\\';
-	$convertdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php
-			\\MangaReader_php\\convert\\';
+	$uploaddir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\upload\\';
+	$convertdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\convert\\';
 } else {
 	$uploaddir = '/var/www/uploads/';
 	$convertdir = '/var/www/convert/';
