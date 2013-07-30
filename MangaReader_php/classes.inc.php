@@ -8,4 +8,4 @@ class chapterInfo {
 	public $chapterURL = "";
 	public $chapterTitle = ""; 
 }
-?>
+?> 

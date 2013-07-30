@@ -2,8 +2,8 @@
 require_once 'classes.inc.php';
 
 /** Global functions **/
-
-function downloadChapter($chapter, $xml, $xml_root) {
+ 
+function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir) {
 	// Analyze page
 	$pageInfo = new imagePageInfo();
 	$pageInfo = analyzePage($chapter->chapterURL);
@@ -12,9 +12,9 @@ function downloadChapter($chapter, $xml, $xml_root) {
 	// Create appended image
 	$bigImage = createBigImage($pageInfo->imageTempURL, 1,
 			$pageInfo->pageCount, $combined, $xml, $xml_root,
-			$chapter->chapterTitle);
+			$chapter->chapterTitle, $tempdir);
 	// Write appended image to file
-	$bigImage->writeimage("C:\\Temp\\Done\\" . $chapter->chapterTitle . ".jpg");
+	$bigImage->writeimage($savedir . $chapter->chapterTitle . ".jpg");
 }
 
 
@@ -39,6 +39,7 @@ function getPage($url) {
 	// 	curl_setopt($ch, CURLOPT_FILE, $handler);
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
 	curl_setopt($ch, CURLOPT_BINARYTRANSFER, TRUE);
+	curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/4.0 (compatible; MSIE 5.01; Windows NT 5.0)");
 	curl_setopt($ch, CURLOPT_HEADER, 0);
 	$data = curl_exec($ch);
 	curl_close($ch);
@@ -51,16 +52,30 @@ function getPage($url) {
 function analyzeTitlePage($titleURL) {
 	// Use patterns from regex.inc
 	global $pattern_chapter;
+	global $pattern_next;
 	// Using array as a return var
 	$chaptersArray = array();
 	$content = getPage($titleURL);
-	if (preg_match_all($pattern_chapter, $content, $matches)) {
+	preg_match_all($pattern_next, $content, $hasNext);
+	$pageNum = 1;
+	$next = TRUE;
+	// Repeat when at least one chapter is found on page
+	while ($next || $pageNum == 1) {
+		preg_match_all($pattern_chapter, $content, $matches);
+		if (count($hasNext[0]) == 0)
+			$next = FALSE;
+		
 		$length = count($matches[1]);
 		for ($i = 0; $i < $length; $i++) {
-			$chaptersArray[$i] = new chapterInfo();
-			$chaptersArray[$i]->chapterURL = $matches[1][$i];
-			$chaptersArray[$i]->chapterTitle = $matches[2][$i];
+			$tempChapter = new chapterInfo();
+			$tempChapter->chapterURL = $matches[1][$i];
+			$tempChapter->chapterTitle = $matches[2][$i];
+			$chaptersArray[] = $tempChapter;
 		}
+		
+		$pageNum = $pageNum+1;
+		$content = getPage($titleURL . "?page=" . $pageNum);
+		preg_match_all($pattern_next, $content, $hasNext);
 	}
 	
 	return $chaptersArray;
@@ -84,6 +99,20 @@ function analyzePage($pageURL) {
 }
 
 /** XML functions **/
+
+function readXML($file) {
+	$fp = fopen($file, "rb") or die("cannot open file");
+	$str = fread($fp, filesize($file));
+	
+	$xml = createXML();
+	$xml->loadXML($str) or die("Error loading XML");
+	
+	return $xml;
+}
+
+function readXMLRoot($xml) {
+	return $xml->documentElement;
+}
 
 /**
  * Write each image part dimensions into XML
@@ -165,7 +194,7 @@ function createChapter($xml, $xml_root, $chapterName) {
 /** Creates basic xml object
  * 
  *  @return DOMDocument
- *  */
+ */
 function createXML() {
 	$xml = new DOMDocument('1.0');
 	$xml->formatOutput = TRUE;
@@ -190,21 +219,91 @@ function createXMLRoot($xml) {
 	return $xml_root;
 }
 
-/** Image grabber **/
+/** ZIP functions **/
+function loadZip($path, $file) {
+	$zip = new ZipArchive;
+	$res = $zip->open($file);
+	if ($res != TRUE) {
+		return FALSE;
+	}
+	
+	echo "Extracting " . $file . " to " . $path . "\n";
+	
+	$zip->extractTo($path);
+	$zip->close();
+	// Read file list
+	$handle = opendir($path);
+	// File array to sort them
+	$item = array();
+	// Reading dir
+	while (false !== ($entry = readdir($handle))) {
+		if ($entry != '.' && $entry != '..' && is_image($path . $entry)) {
+			if (!is_dir($entry)) {
+				$item[] = $entry;
+				echo $entry . "<br>";
+			}
+		}
+	}
+	closedir($handle);
+	
+	return $item;
+}
+
+/** Image functions **/
 
 function grabImage($tempFile, $url, $handler) {
 	$data = getPage($url);
 	file_put_contents($tempFile, $data);
 }
 
+function is_image($path)
+{
+	$a = getimagesize($path);
+	$image_type = $a[2];
+	 
+	if(in_array($image_type , array(IMAGETYPE_GIF , IMAGETYPE_JPEG ,IMAGETYPE_PNG , IMAGETYPE_BMP)))
+	{
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Downloads images with given URL template, adds them into XML document
+ * and creates a big combined image
+ * 
+ * @param String $urlTemp <br>
+ * Image URL template 
+ * 
+ * @param Integer $minIdx <br>
+ * First index
+ * 
+ * @param Integer $maxIdx <br>
+ * Last index
+ * 
+ * @param Imagick $combined <br>
+ * Combined image object to return
+ * 
+ * @param DOMDocument $xml <br>
+ * Main XML document
+ * 
+ * @param DOMElement $xml_root <br>
+ * Root XML node
+ * 
+ * @param String $chapterName <br>
+ * Chapter name to use in XML
+ * 
+ * @return Imagick
+ */
 function createBigImage($urlTemp, $minIdx, $maxIdx,
-		$combined, $xml, $xml_root, $chapterName) {
+		$combined, $xml, $xml_root, $chapterName,
+		$tempdir) {
 	$all = new Imagick();
 	$xml_chapter = createChapter($xml, $xml_root, $chapterName);
 	$dim = ['width' => 0, 'height' => 0];
 	for ($i = $minIdx; $i < $maxIdx+1; $i++) {
 		// Make temp file
-		$tempFile = "c:\\Temp\\" . $i . ".jpg";
+		$tempFile = $tempdir . $i . ".jpg";
 		$handle = fopen($tempFile, 'w+');
 		// Construct URL
 		$url = $urlTemp . '/' . $i . ".jpg";
