@@ -1,5 +1,197 @@
 <?php
 require_once 'classes.inc.php';
+require_once 'regex.inc.php';
+
+/** DB Grabber functions **/
+
+/**
+ * Creates MangaBase DB
+ * 
+ * @return SQLite3
+ */
+function createDB() {
+	if ($db = new SQLite3('MangaBase')) {
+		// Main table
+		$q = @$db->query('CREATE TABLE IF NOT EXISTS MangaReader_Main(`_id` INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, url_home TEXT NOT NULL, book_table TEXT, local_path TEXT, about TEXT, rating INTEGER, chapter_count INTEGER, ongoing INTEGER, coverX INTEGER, coverY INTEGER, coverW INTEGER, coverH INTEGER, favorite INTEGER DEFAULT 0, version INTEGER NOT NULL, UNIQUE (title, url_home) ON CONFLICT FAIL);');	
+		$q = @$db->query("CREATE TABLE IF NOT EXISTS `MangaReader_Genres` (`_id` INTEGER NOT NULL primary key autoincrement, `genre` varchar(255) NOT NULL, `version` INTEGER NOT NULL);");
+		$q = @$db->query("CREATE TABLE IF NOT EXISTS `MangaReader_Genres_Link` (`genre_id` INTEGER   NULL, `manga_id` INTEGER   NULL, `version` INTEGER NOT NULL);");
+		$q = @$db->query("CREATE TABLE IF NOT EXISTS `MangaReader_Downloads` (`_id` INTEGER NOT NULL primary key autoincrement, `manga_id` INTEGER NULL, `chapter_id` INTEGER NULL,	`chapter_name` TEXT NOT NULL, `chapter_state` INTEGER '0', `chapter_download_percent` INTEGER '0', `last_page` INTEGER '1');");
+	} else {
+		die($err);
+	}
+	return $db;
+}
+
+function getListHTML($url) {
+	$data = getPage($url);
+	return $data; 
+}
+
+function getBookArray($data) {
+	global $pattern_book;
+	
+	$bookArray = array();
+	
+	if (preg_match_all($pattern_book, $data, $bookMatches)) {
+		$length = count($bookMatches[1]);
+		for ($i = 0; $i < $length; $i++) {
+			$book = new Book();
+			$book->title = $bookMatches[2][$i];
+			$book->url_home = $bookMatches[1][$i];
+			$bookArray[] = $book;
+		}
+	} 
+	
+	return $bookArray;
+}
+
+/**
+ * Get book info
+ * 
+ * @param Book $book <br>
+ * Book object with title and url_home fields set
+ * 
+ * @return Book
+ */
+function getBookInfo(Book $book) {
+	global $pattern_details;
+	global $pattern_genres;
+	
+	$data = getPage($book->url_home);
+	
+	// Match details pattern: [2] - about, [3] - ongoing, [5] - rating (numeric) 
+	if (preg_match($pattern_details, $data, $details)) {
+		$book->about = $details[2];
+		$book->ongoing = $details[3] == 'Completed' ? 0 : 1;
+		$book->rating = $details[5];
+		if (preg_match_all($pattern_genres, $data, $genres)) {
+			foreach ($genres[1] as $genre) {
+				$book->genres[] = $genre;
+			}
+		}
+	}
+	
+	return $book;
+}
+
+/**
+ * Calculates current book's dimensions
+ * 
+ * @param Imagick $im <br>
+ * Imagick object with current image
+ * 
+ * @param Book $book <br>
+ * Current book
+
+ * @param Array['width','height'] $prevDim <br>
+ * Imagick dimensions array for current big image
+ *
+ * @return Array['width','height']
+ */
+function writeCoverDims(Book $book, Imagick $im, $prevDim) {
+	// Grab geometry and offset (from prev geometry + prev offset)
+	$dim = $im->getImageGeometry();
+	$width = $dim['width'];
+	$height = $dim['height'];
+	$offset = [
+	"x" => $prevDim["width"],
+	"y" => $prevDim["height"]
+	];
+	// Writing cover dims to Book object
+	$book->cover["x"] = $offset["x"];
+	$book->cover["y"] = $offset["y"];
+	$book->cover["w"] = $width;
+	$book->cover["h"] = $height;
+	// Now calculate next offset
+	$nextOffset = [
+	'width' => $dim["width"]+$offset["x"],
+	'height' => $dim["height"]+$offset["y"]
+	];
+
+	return $nextOffset;
+}
+
+/**
+ * Add current book into main table
+ * 
+ * @param Book $book <br>
+ * Current book
+ * 
+ * @param SQLite3 $db <br>
+ * SQLite3 opened database
+ * 
+ */
+function populateMainTable(Book $book, SQLite3 $db) {
+	$mangaID = @$db->query('SELECT _id FROM MangaReader_Main WHERE title = "' . $book->title . '";')->fetchArray();
+	if ($mangaID == FALSE) {
+	$stmt = $db->prepare('INSERT INTO MangaReader_Main (title, url_home, book_table, about, coverX, coverY, coverW, coverH, rating, chapter_count, ongoing, version) 
+			VALUES (:title, :url_home, :book_table, :about, :coverX, :coverY, :coverW, :coverH, :rating, :chapter_count, :ongoing, 1);');
+		$stmt->bindValue(":title", $book->title, SQLITE3_TEXT);
+		$stmt->bindValue(":url_home", $book->url_home, SQLITE3_TEXT);
+		$stmt->bindValue(":book_table", "[" . $book->title . "]", SQLITE3_TEXT);
+		$stmt->bindValue(":about", $book->about, SQLITE3_TEXT);
+		$stmt->bindValue(":rating", $book->rating, SQLITE3_INTEGER);
+		$stmt->bindValue(":chapter_count", $book->chapter_count, SQLITE3_INTEGER);
+		$stmt->bindValue(":ongoing", $book->ongoing, SQLITE3_INTEGER);
+		$stmt->bindValue(":coverX", $book->cover["x"]);
+		$stmt->bindValue(":coverY", $book->cover["y"]);
+		$stmt->bindValue(":coverW", $book->cover["w"]);
+		$stmt->bindValue(":coverH", $book->cover["h"]);
+	
+		$stmt->execute();
+	}
+}
+
+function createChapterTable(SQLite3 $db, Book $book, $chapterArray) {
+	global $pattern_chapterNum;
+	$tableName = "[" . $book->title . "]";
+	
+	$q = @$db->query("CREATE TABLE IF NOT EXISTS `" . $tableName . "`(`_id` INTEGER NOT NULL primary key autoincrement, `chapter_name` varchar(255) NOT NULL, `chapter_url` text NOT NULL, `chapter_num` float   NULL, `chapter_state` INTEGER   '0', `chapter_page_num` INTEGER '0', `chapter_download_percent` INTEGER '0', `version` INTEGER NOT NULL, UNIQUE (chapter_name, chapter_url) ON CONFLICT FAIL);");
+	
+	foreach ($chapterArray as $chapter) {
+		
+		preg_match($pattern_chapterNum, $chapter->chapterURL, $chapterNum);
+		
+		$q = @$db->query("INSERT INTO '" . $tableName . "'(chapter_name, chapter_url, chapter_num, version) VALUES ('" . $chapter->chapterTitle . "', '" . $chapter->chapterURL . "', " . $chapterNum[1] . ", 1);");
+	}
+}
+
+/**
+ * Populate Genres and Genres_Link tables with book's genres
+ * 
+ * @param Book $book <br>
+ * Current book
+ * 
+ * @param SQLite3 $db <br>
+ * SQLite3 opened database
+ * 
+ */
+function populateGenresTable(Book $book, SQLite3 $db) {
+	foreach ($book->genres as $genre) {
+		// Check if we have all genres in DB
+		$genreID = @$db->query('SELECT `_id` FROM MangaReader_Genres WHERE genre = "' . $genre . '";')->fetchArray();
+		if ($genreID == FALSE) {
+			$db->query('INSERT INTO MangaReader_Genres (genre, version) VALUES ("' . $genre . '", 1);');
+			$genreID = @$db->query('SELECT _id FROM MangaReader_Genres WHERE genre = "' . $genre . '";')->fetchArray();
+		}
+		// Check if we have links in DB
+		$mangaIDstmt = $db->prepare('SELECT `_id` FROM MangaReader_Main WHERE title = :title;');
+		$mangaIDstmt->bindValue(":title", $book->title, SQLITE3_TEXT);
+		$mangaID = $mangaIDstmt->execute()->fetchArray();
+		
+		$linkIDstmt = $db->prepare('SELECT * FROM MangaReader_Genres_Link WHERE genre_id = :genreID AND manga_id = :mangaID;');
+		$linkIDstmt->bindValue(":genreID", $genreID[0], SQLITE3_INTEGER);
+		$linkIDstmt->bindValue(":mangaID", $mangaID[0], SQLITE3_INTEGER);
+		$linkID = $linkIDstmt->execute()->fetchArray();
+		
+		if ($linkID == FALSE) {
+			$stmt = @$db->prepare('INSERT INTO MangaReader_Genres_Link (genre_id, manga_id, version) VALUES (:genreID,:mangaID,1);');
+			$stmt->bindValue(":genreID", $genreID[0], SQLITE3_INTEGER);
+			$stmt->bindValue(":mangaID", $mangaID[0], SQLITE3_INTEGER);
+			$stmt->execute();
+		}
+	}
+}
 
 /** Global functions **/
  
