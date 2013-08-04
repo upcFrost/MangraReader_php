@@ -2,10 +2,8 @@
 // Details
 $pattern_book = '#<td><a href="(http://www.goodmanga.net/\d*/.*)">(.*)</a></td>#';
 $pattern_cover = '#<img src="(.*goodmanga.net/images/series/large/\d*.jpg)" id="series_image"#';
-$pattern_details_open = '<div id="series_details">';
-$pattern_details_close = '<div id="series_social">';
 $pattern_details = '#<div id="series_details">.*<span>Authors:</span>(.*?)</div>.*?<span>Description:</span>.*?<div>(.*?)</div>.*<span>Status:</span>(.*?)</div>.*<span>Released:</span>(.*?)</div>.*<span id="rating_num">(.*?)</span>#s';
-$pattern_big_about = '<span id="full_notes">(.*?)<a href="#';
+$pattern_big_about = '/<span id="full_notes">(.*?)<a href="#/s';
 $pattern_ongoing = 'ongoing';
 $pattern_genres = '#<a href="http://www.goodmanga.net/manga-genre/.*?">(.*?)</a>#';
 $pattern_next = '#<li><a.*?page=\d+">Next</a>#i';

@@ -15,6 +15,7 @@ class Book {
 	public $book_table = "";
 	public $local_path = "";
 	public $about = "";
+	public $author = "";
 	public $genres = array();
 	public $cover = ['x' => 0, 'y' => 0, 'w' => 0, 'h' => 0];
 	public $rating = 0;

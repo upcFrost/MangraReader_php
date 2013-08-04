@@ -10,9 +10,9 @@ require_once 'regex.inc.php';
  * @return SQLite3
  */
 function createDB() {
-	if ($db = new SQLite3('MangaBase')) {
+	if ($db = new SQLite3('db/MangaBase.db')) {
 		// Main table
-		$q = @$db->query('CREATE TABLE IF NOT EXISTS MangaReader_Main(`_id` INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, url_home TEXT NOT NULL, book_table TEXT, local_path TEXT, about TEXT, rating INTEGER, chapter_count INTEGER, ongoing INTEGER, coverX INTEGER, coverY INTEGER, coverW INTEGER, coverH INTEGER, favorite INTEGER DEFAULT 0, version INTEGER NOT NULL, UNIQUE (title, url_home) ON CONFLICT FAIL);');	
+		$q = @$db->query('CREATE TABLE IF NOT EXISTS MangaReader_Main(`_id` INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, url_home TEXT NOT NULL, book_table TEXT, local_path TEXT, about TEXT, author TEXT, rating INTEGER, chapter_count INTEGER, ongoing INTEGER, coverX INTEGER, coverY INTEGER, coverW INTEGER, coverH INTEGER, favorite INTEGER DEFAULT 0, version INTEGER NOT NULL, UNIQUE (title, url_home) ON CONFLICT FAIL);');	
 		$q = @$db->query("CREATE TABLE IF NOT EXISTS `MangaReader_Genres` (`_id` INTEGER NOT NULL primary key autoincrement, `genre` varchar(255) NOT NULL, `version` INTEGER NOT NULL);");
 		$q = @$db->query("CREATE TABLE IF NOT EXISTS `MangaReader_Genres_Link` (`genre_id` INTEGER   NULL, `manga_id` INTEGER   NULL, `version` INTEGER NOT NULL);");
 		$q = @$db->query("CREATE TABLE IF NOT EXISTS `MangaReader_Downloads` (`_id` INTEGER NOT NULL primary key autoincrement, `manga_id` INTEGER NULL, `chapter_id` INTEGER NULL,	`chapter_name` TEXT NOT NULL, `chapter_state` INTEGER '0', `chapter_download_percent` INTEGER '0', `last_page` INTEGER '1');");
@@ -56,14 +56,25 @@ function getBookArray($data) {
 function getBookInfo(Book $book) {
 	global $pattern_details;
 	global $pattern_genres;
+	global $pattern_big_about;
 	
 	$data = getPage($book->url_home);
 	
-	// Match details pattern: [2] - about, [3] - ongoing, [5] - rating (numeric) 
+	// Match details pattern: 
+	// [1] - author, [2] - about, 
+	// [3] - ongoing, [5] - rating (numeric) 
 	if (preg_match($pattern_details, $data, $details)) {
-		$book->about = $details[2];
+		// Check if we have collapsed about
+		if (preg_match($pattern_big_about, $data, $big_about)) {
+			$book->about = $big_about[1];
+		} else {
+			$book->about = $details[2];
+		}
+		// Set other vars
+		$book->author = $details[1];
 		$book->ongoing = $details[3] == 'Completed' ? 0 : 1;
 		$book->rating = $details[5];
+		// Construct genres array
 		if (preg_match_all($pattern_genres, $data, $genres)) {
 			foreach ($genres[1] as $genre) {
 				$book->genres[] = $genre;
@@ -105,7 +116,7 @@ function writeCoverDims(Book $book, Imagick $im, $prevDim) {
 	// Now calculate next offset
 	$nextOffset = [
 	'width' => $dim["width"]+$offset["x"],
-	'height' => $dim["height"]+$offset["y"]
+	'height' => $offset["y"] // We're using horizontal stacking
 	];
 
 	return $nextOffset;
@@ -241,6 +252,14 @@ function getPage($url) {
 
 /** Page analysis functions **/
 
+/**
+ * Get chapter array from book's title page
+ * 
+ * @param String $titleURL <br>
+ * Title page URL
+ * 
+ * @return chapterInfo array
+ */
 function analyzeTitlePage($titleURL) {
 	// Use patterns from regex.inc
 	global $pattern_chapter;
@@ -353,7 +372,7 @@ function writeDims($xml, $im, $page, $prevDim, $xml_chapter) {
 	// Now calculate next offset
 	$nextOffset = [
 		'width' => $dim["width"]+$offset["x"],
-		'height' => $dim["height"]+$offset["y"]
+		'height' => $offset["y"] // We're using horizontal stacking
 	];
 	
 	return $nextOffset;

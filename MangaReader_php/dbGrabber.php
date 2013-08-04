@@ -3,14 +3,16 @@ include 'functions.inc.php';
 require_once 'classes.inc.php';
 require_once 'regex.inc.php';
 
+ini_set('max_execution_time', 900);
+
 $OS = 'Windows';
 // $OS = 'Linux';
 
 if ($OS == 'Windows') {
-	$savedir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\grabbed\\';
+	$coverdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\cover\\';
 	$tempdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\temp\\';
 } else {
-	$savedir = '/var/www/grabbed/';
+	$coverdir = '/var/www/cover/';
 	$tempdir = '/var/www/temp/';
 }
 
@@ -47,15 +49,19 @@ foreach ($bookArray as $book) {
 	fclose($handle);
 	// Write book info into main table
 	populateMainTable($book, $db);
+	// Create chapter table for this book
 	createChapterTable($db, $book, $chaptersArray);
+	// Create genres table and link it to the book
 	populateGenresTable($book, $db);
 	
 	$i++;
-	if ($i>2) break;
+	if ($i>10) break;
 } 
 $bigCover->resetiterator();
 $combined = $bigCover->appendimages(FALSE);
 // Write appended image to file
-$combined->writeimage($savedir . "cover.jpg");
-@$db->close();
+$combined->writeimage($coverdir . "cover.jpg");
+$db->close();
+
+echo "Main database created.<br>";
 ?>
