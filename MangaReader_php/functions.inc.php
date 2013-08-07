@@ -133,13 +133,18 @@ function writeCoverDims(Book $book, Imagick $im, $prevDim) {
  * 
  */
 function populateMainTable(Book $book, SQLite3 $db) {
-	$mangaID = @$db->query('SELECT _id FROM MangaReader_Main WHERE title = "' . $book->title . '";')->fetchArray();
+	$mangaIDstmt = $db->prepare("SELECT _id FROM MangaReader_Main WHERE title = :title;");
+	$mangaIDstmt->bindValue(":title", $title = str_replace('"', "", $book->title));
+	$mangaID = $mangaIDstmt->execute()->fetchArray();
 	if ($mangaID == FALSE) {
-	$stmt = $db->prepare('INSERT INTO MangaReader_Main (title, url_home, book_table, about, coverX, coverY, coverW, coverH, rating, chapter_count, ongoing, version) 
-			VALUES (:title, :url_home, :book_table, :about, :coverX, :coverY, :coverW, :coverH, :rating, :chapter_count, :ongoing, 1);');
-		$stmt->bindValue(":title", $book->title, SQLITE3_TEXT);
+		$stmt = $db->prepare("INSERT OR IGNORE INTO MangaReader_Main (title, url_home, book_table, about, coverX, coverY, coverW, coverH, rating, chapter_count, ongoing, version) 
+				VALUES (:bookTitle, :url_home, :book_table, :about, :coverX, :coverY, :coverW, :coverH, :rating, :chapter_count, :ongoing, 1);");
+		$title = str_replace('"', "", $book->title);
+		$tableName = str_replace('"', "", $book->title);
+
+		$stmt->bindValue(":bookTitle", $title, SQLITE3_TEXT);
 		$stmt->bindValue(":url_home", $book->url_home, SQLITE3_TEXT);
-		$stmt->bindValue(":book_table", "[" . $book->title . "]", SQLITE3_TEXT);
+		$stmt->bindValue(":book_table", "[" . $tableName . "]", SQLITE3_TEXT);
 		$stmt->bindValue(":about", $book->about, SQLITE3_TEXT);
 		$stmt->bindValue(":rating", $book->rating, SQLITE3_INTEGER);
 		$stmt->bindValue(":chapter_count", $book->chapter_count, SQLITE3_INTEGER);
@@ -148,22 +153,29 @@ function populateMainTable(Book $book, SQLite3 $db) {
 		$stmt->bindValue(":coverY", $book->cover["y"]);
 		$stmt->bindValue(":coverW", $book->cover["w"]);
 		$stmt->bindValue(":coverH", $book->cover["h"]);
-	
 		$stmt->execute();
 	}
 }
 
 function createChapterTable(SQLite3 $db, Book $book, $chapterArray) {
 	global $pattern_chapterNum;
-	$tableName = "[" . $book->title . "]";
+	$tableName = "[" . str_replace('"', "", $book->title) . "]";
 	
-	$q = @$db->query("CREATE TABLE IF NOT EXISTS `" . $tableName . "`(`_id` INTEGER NOT NULL primary key autoincrement, `chapter_name` varchar(255) NOT NULL, `chapter_url` text NOT NULL, `chapter_num` float   NULL, `chapter_state` INTEGER   '0', `chapter_page_num` INTEGER '0', `chapter_download_percent` INTEGER '0', `version` INTEGER NOT NULL, UNIQUE (chapter_name, chapter_url) ON CONFLICT FAIL);");
+	$q = $db->query("CREATE TABLE IF NOT EXISTS `" . $tableName . "`(`_id` INTEGER NOT NULL primary key autoincrement, `chapter_name` varchar(255) NOT NULL, `chapter_url` text NOT NULL, `chapter_num` float   NULL, `chapter_state` INTEGER '0', `chapter_last_page` INTEGER '1', `chapter_page_num` INTEGER '0', `chapter_download_percent` INTEGER '0', `version` INTEGER NOT NULL, UNIQUE (chapter_name, chapter_url) ON CONFLICT FAIL);");
 	
 	foreach ($chapterArray as $chapter) {
 		
 		preg_match($pattern_chapterNum, $chapter->chapterURL, $chapterNum);
 		
-		$q = @$db->query("INSERT INTO '" . $tableName . "'(chapter_name, chapter_url, chapter_num, version) VALUES ('" . $chapter->chapterTitle . "', '" . $chapter->chapterURL . "', " . $chapterNum[1] . ", 1);");
+		$title = str_replace('"', "", $chapter->chapterTitle);	
+		
+		$stmt = $db->prepare("INSERT OR IGNORE INTO `". $tableName ."`(chapter_name, chapter_url, chapter_num, 
+				chapter_page_num, chapter_last_page, version) VALUES (:title, :url, :num, :page_num, 1, 1);");
+		$stmt->bindValue(":title", $title, SQLITE3_TEXT);
+		$stmt->bindValue(":url", $chapter->chapterURL, SQLITE3_TEXT);
+		$stmt->bindValue(":num", $chapterNum[1], SQLITE3_INTEGER);
+		$stmt->bindValue(":page_num", $chapter->pageCount, SQLITE3_INTEGER);
+		$stmt->execute();
 	}
 }
 
@@ -209,7 +221,7 @@ function populateGenresTable(Book $book, SQLite3 $db) {
 function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir) {
 	// Analyze page
 	$pageInfo = new imagePageInfo();
-	$pageInfo = analyzePage($chapter->chapterURL);
+	$pageInfo = analyzePage($chapter->chapterURL, $chapter);
 	// Create image and xml objects
 	$combined = new Imagick();
 	// Create appended image
@@ -217,9 +229,17 @@ function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir) {
 			$pageInfo->pageCount, $combined, $xml, $xml_root,
 			$chapter->chapterTitle, $tempdir);
 	// Write appended image to file
-	$bigImage->writeimage($savedir . $chapter->chapterTitle . ".jpg");
+	$bigImage->writeimage($savedir . str_replace("/", "_", $chapter->chapterTitle) . ".jpg");
 }
 
+function checkStringContent($string) {
+	$string = str_replace("/", "_", $string);
+	$string = str_replace('"', "'", $string);
+	$string = str_replace(".", "_", $string);
+	$string = str_replace(" ", "_", $string);
+	
+	return $string;
+}
 
 /** Network functions **/
 
@@ -233,11 +253,12 @@ function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir) {
  */
 function getPage($url) {
 	$ch = curl_init($url);
-	$proxy = '10.100.120.37:3128';
-	// 	$proxyauth = 'user:pass';
+// 	$proxy = '10.100.120.37:3128';
+	$proxy = '10.100.100.10:8080';
+	$proxyauth = 'PBelyaev:B1980p!';
 	
 	curl_setopt($ch, CURLOPT_PROXY, $proxy);
-	// 	curl_setopt($ch, CURLOPT_PROXYUSERPWD, $proxyauth);
+	curl_setopt($ch, CURLOPT_PROXYUSERPWD, $proxyauth);
 	curl_setopt($ch, CURLOPT_FOLLOWLOCATION, TRUE);
 	// 	curl_setopt($ch, CURLOPT_FILE, $handler);
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
@@ -292,7 +313,7 @@ function analyzeTitlePage($titleURL) {
 	return $chaptersArray;
 }
 
-function analyzePage($pageURL) {
+function analyzePage($pageURL, chapterInfo $chapter) {
 	// Use patterns from regex.inc
 	global $pattern_page;
 	global $pattern_page_count;
@@ -304,6 +325,7 @@ function analyzePage($pageURL) {
 		$pageInfo = new imagePageInfo();
 		$pageInfo->imageTempURL = $imageTempURL[1];
 		$pageInfo->pageCount = $pageCount[1];
+		$chapter->pageCount = $pageCount[1];
 		return $pageInfo;
 	}
 	return FALSE;
@@ -517,7 +539,8 @@ function createBigImage($urlTemp, $minIdx, $maxIdx,
 		$tempFile = $tempdir . $i . ".jpg";
 		$handle = fopen($tempFile, 'w+');
 		// Construct URL
-		$url = $urlTemp . '/' . $i . ".jpg";
+		$url = $urlTemp . $i . ".jpg";
+		echo "<br>$url<br>";
 		// Download image
 		grabImage($tempFile, $url, $handle);
 		// Create Imagick object from image

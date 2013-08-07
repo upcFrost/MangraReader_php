@@ -1,32 +1,42 @@
 <?php
-include 'functions.inc.php';
+require_once 'functions.inc.php';
 require_once 'classes.inc.php';
 require_once 'regex.inc.php';
 
 ini_set('max_execution_time', 900);
 
-$OS = 'Windows';
-// $OS = 'Linux';
-
-if ($OS == 'Windows') {
-	$coverdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\cover\\';
-	$tempdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\temp\\';
-} else {
-	$coverdir = '/var/www/cover/';
-	$tempdir = '/var/www/temp/';
-}
+// Windows
+$coverdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\cover\\';
+$grabbeddirTemp = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\grabbed\\';
+$tempdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\temp\\';
+$coverdirTemp = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\cover\\temp\\';
+// Linux
+// $coverdir = '/var/www/cover/';
+// $grabbeddirTemp = '/var/www/grabbed/';
+// $tempdir = '/var/www/temp/';
 
 
 $db = createDB();
 $data = getListHTML('http://www.goodmanga.net/manga-list');
 $bigCover = new Imagick();
+if (!file_exists($coverdirTemp)) mkdir($coverdirTemp, 0777, TRUE);
 
 $bookArray = getBookArray($data);
 
-$i = 0;
+$idx = 0;
 $dim = ['width' => 0, 'height' => 0];
 foreach ($bookArray as $book) {
+	echo "Book " . $book->title . "<br>";
+	// Create new XML
+	$xml = createXML();
+	$xml_root = createXMLRoot($xml);
+	// Get book info
 	$book = getBookInfo($book);
+	// Create dirs
+	echo "Creating dirs... ";
+	$grabbeddir = $grabbeddirTemp . $book->title . '\\';
+	if (!file_exists($grabbeddir)) mkdir($grabbeddir, 0777, TRUE);
+	echo "done<br>";
 	// Get chapters array
 	$chaptersArray = analyzeTitlePage($book->url_home);
 	echo "Loading book " . str_replace('"', "", $book->title) . "<br>";
@@ -36,7 +46,7 @@ foreach ($bookArray as $book) {
 	echo "done<br>";
 	// Make temp file
 	echo "Loading cover... ";
-	$tempFile = $tempdir . $i . ".jpg";
+	$tempFile = $coverdirTemp . $idx . ".jpg";
 	$handle = fopen($tempFile, 'w+');
 	// Construct URL
 	$content = getPage($book->url_home);
@@ -56,6 +66,13 @@ foreach ($bookArray as $book) {
 	echo "Populating main table... ";
 	populateMainTable($book, $db);
 	echo "done<br>";
+	// Download chapters
+	echo "Downloading chapters... ";
+	foreach ($chaptersArray as $chapter) {
+		downloadChapter($chapter, $xml, $xml_root,
+		$tempdir, $grabbeddir);
+	}
+	echo "done<br>";
 	// Create chapter table for this book
 	echo "Creating chapter table... ";
 	createChapterTable($db, $book, $chaptersArray);
@@ -64,8 +81,12 @@ foreach ($bookArray as $book) {
 	echo "Populating genres table... ";
 	populateGenresTable($book, $db);
 	echo "done<br>";
-	$i++;
-	if ($i>30) break;
+	// Write XML to disk
+	echo "Writing XML to disk... ";
+	$xml->save($grabbeddir . $book->title . ".xml");
+	echo "done<br>";
+	$idx++;
+	if ($idx>2) break;
 } 
 $bigCover->resetiterator();
 $combined = $bigCover->appendimages(FALSE);

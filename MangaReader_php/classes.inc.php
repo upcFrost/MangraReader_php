@@ -7,6 +7,7 @@ class imagePageInfo {
 class chapterInfo {
 	public $chapterURL = "";
 	public $chapterTitle = ""; 
+	public $pageCount = 0;
 }
 
 class Book {
