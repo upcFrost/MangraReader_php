@@ -170,7 +170,7 @@ function createChapterTable(SQLite3 $db, Book $book, $chapterArray) {
 		$title = str_replace('"', "", $chapter->chapterTitle);	
 		
 		$stmt = $db->prepare("INSERT OR IGNORE INTO `". $tableName ."`(chapter_name, chapter_url, chapter_num, 
-				chapter_page_num, chapter_last_page, version) VALUES (:title, :url, :num, :page_num, 1, 1);");
+				chapter_page_num, version) VALUES (:title, :url, :num, :page_num, 1);");
 		$stmt->bindValue(":title", $title, SQLITE3_TEXT);
 		$stmt->bindValue(":url", $chapter->chapterURL, SQLITE3_TEXT);
 		$stmt->bindValue(":num", $chapterNum[1], SQLITE3_INTEGER);
@@ -229,11 +229,16 @@ function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir) {
 			$pageInfo->pageCount, $combined, $xml, $xml_root,
 			$chapter->chapterTitle, $tempdir);
 	// Write appended image to file
-	$bigImage->writeimage($savedir . str_replace("/", "_", $chapter->chapterTitle) . ".jpg");
+	$bigImage->writeimage($savedir . checkStringContent($chapter->chapterTitle) . ".jpg");
 }
 
 function checkStringContent($string) {
 	$string = str_replace("/", "_", $string);
+	$string = str_replace("$", "_", $string);
+	$string = str_replace("%", "_", $string);
+	$string = str_replace("@", "_", $string);
+	$string = str_replace("&", "_", $string);
+	$string = str_replace("\\", "_", $string);
 	$string = str_replace('"', "'", $string);
 	$string = str_replace(".", "_", $string);
 	$string = str_replace(" ", "_", $string);
@@ -253,12 +258,12 @@ function checkStringContent($string) {
  */
 function getPage($url) {
 	$ch = curl_init($url);
-// 	$proxy = '10.100.120.37:3128';
-	$proxy = '10.100.100.10:8080';
-	$proxyauth = 'PBelyaev:B1980p!';
+	$proxy = '10.100.120.37:3128';
+// 	$proxy = '10.100.100.10:8080';
+// 	$proxyauth = 'PBelyaev:B1980p!';
 	
 	curl_setopt($ch, CURLOPT_PROXY, $proxy);
-	curl_setopt($ch, CURLOPT_PROXYUSERPWD, $proxyauth);
+// 	curl_setopt($ch, CURLOPT_PROXYUSERPWD, $proxyauth);
 	curl_setopt($ch, CURLOPT_FOLLOWLOCATION, TRUE);
 	// 	curl_setopt($ch, CURLOPT_FILE, $handler);
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
@@ -543,12 +548,17 @@ function createBigImage($urlTemp, $minIdx, $maxIdx,
 		echo "<br>$url<br>";
 		// Download image
 		grabImage($tempFile, $url, $handle);
-		// Create Imagick object from image
-		$im = new Imagick("jpg:$tempFile");
-		// Write image xml data
-		$dim = writeDims($xml, $im, $i, $dim, $xml_chapter);
-		// Append object into array
-		$all->addimage($im);
+		// File might be empty on server, so using try/catch
+		try {
+			// Create Imagick object from image
+			$im = new Imagick("jpg:$tempFile");
+			// Write image xml data
+			$dim = writeDims($xml, $im, $i, $dim, $xml_chapter);
+			// Append object into array
+			$all->addimage($im);
+		} catch (Exception $e) {
+			
+		}
 		fclose($handle);
 	}
 	$all->resetiterator();

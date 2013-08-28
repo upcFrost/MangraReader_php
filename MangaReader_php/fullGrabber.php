@@ -3,7 +3,7 @@ require_once 'functions.inc.php';
 require_once 'classes.inc.php';
 require_once 'regex.inc.php';
 
-ini_set('max_execution_time', 900);
+ini_set('max_execution_time', 9000);
 
 // Windows
 $coverdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\cover\\';
@@ -34,7 +34,7 @@ foreach ($bookArray as $book) {
 	$book = getBookInfo($book);
 	// Create dirs
 	echo "Creating dirs... ";
-	$grabbeddir = $grabbeddirTemp . $book->title . '\\';
+	$grabbeddir = $grabbeddirTemp . checkStringContent($book->title) . '\\';
 	if (!file_exists($grabbeddir)) mkdir($grabbeddir, 0777, TRUE);
 	echo "done<br>";
 	// Get chapters array
@@ -83,10 +83,10 @@ foreach ($bookArray as $book) {
 	echo "done<br>";
 	// Write XML to disk
 	echo "Writing XML to disk... ";
-	$xml->save($grabbeddir . $book->title . ".xml");
+	$xml->save($grabbeddir . checkStringContent($book->title) . ".xml");
 	echo "done<br>";
 	$idx++;
-	if ($idx>2) break;
+	if ($idx>30) break;
 } 
 $bigCover->resetiterator();
 $combined = $bigCover->appendimages(FALSE);
