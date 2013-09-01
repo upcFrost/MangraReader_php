@@ -3,7 +3,7 @@ require_once 'functions.inc.php';
 require_once 'classes.inc.php';
 require_once 'regex.inc.php';
 
-ini_set('max_execution_time', 9000);
+ini_set('max_execution_time', 90000);
 
 // Windows
 $coverdir = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\cover\\';
@@ -16,9 +16,14 @@ $coverdirTemp = 'C:\\Users\\PBelyaev\\git\\MangaReader_php\\MangaReader_php\\cov
 // $tempdir = '/var/www/temp/';
 
 
-$db = createDB();
+$mainDB = createDB();
 $data = getListHTML('http://www.goodmanga.net/manga-list');
-$bigCover = new Imagick();
+// Check if cover file exists
+if (file_exists($coverdir . "cover.jpg")) {
+	$bigCover = new Imagick($coverdir . "cover.jpg");
+} else {
+	$bigCover = new Imagick();
+}
 if (!file_exists($coverdirTemp)) mkdir($coverdirTemp, 0777, TRUE);
 
 $bookArray = getBookArray($data);
@@ -27,15 +32,28 @@ $idx = 0;
 $dim = ['width' => 0, 'height' => 0];
 foreach ($bookArray as $book) {
 	echo "Book " . $book->title . "<br>";
-	// Create new XML
-	$xml = createXML();
-	$xml_root = createXMLRoot($xml);
 	// Get book info
 	$book = getBookInfo($book);
 	// Create dirs
 	echo "Creating dirs... ";
 	$grabbeddir = $grabbeddirTemp . checkStringContent($book->title) . '\\';
-	if (!file_exists($grabbeddir)) mkdir($grabbeddir, 0777, TRUE);
+	if (!file_exists($grabbeddir)) 
+		mkdir($grabbeddir, 0777, TRUE);
+	echo "done<br>";
+	// Loading book SQLite DB
+	$bookDB = createBookDB($grabbeddir);
+	// Checking if XML exists
+	echo "Checking if XML exists... ";
+	if (file_exists($grabbeddir . checkStringContent($book->title) . ".xml")) {
+		$xml = loadXML($grabbeddir . checkStringContent($book->title) . ".xml");
+		$xml_root = $xml->documentElement;
+		echo "exists... ";
+	} else {
+	// Create new XML
+		$xml = createXML();
+		$xml_root = createXMLRoot($xml);
+		echo "creating... ";
+	}
 	echo "done<br>";
 	// Get chapters array
 	$chaptersArray = analyzeTitlePage($book->url_home);
@@ -45,7 +63,7 @@ foreach ($bookArray as $book) {
 	$book->chapter_count = count($chaptersArray);
 	echo "done<br>";
 	// Make temp file
-	echo "Loading cover... ";
+	echo "Downloading cover... ";
 	$tempFile = $coverdirTemp . $idx . ".jpg";
 	$handle = fopen($tempFile, 'w+');
 	// Construct URL
@@ -64,35 +82,42 @@ foreach ($bookArray as $book) {
 	echo "done<br>";
 	// Write book info into main table
 	echo "Populating main table... ";
-	populateMainTable($book, $db);
+	populateMainTable($book, $mainDB);
 	echo "done<br>";
 	// Download chapters
 	echo "Downloading chapters... ";
 	foreach ($chaptersArray as $chapter) {
-		downloadChapter($chapter, $xml, $xml_root,
-		$tempdir, $grabbeddir);
+		// Checking if chapter exists
+		if (!file_exists($grabbeddir . checkStringContent($chapter->chapterTitle) . ".jpg")) {
+			downloadChapter($chapter, $xml, $xml_root,
+				$tempdir, $grabbeddir, $bookDB);
+		}
 	}
 	echo "done<br>";
 	// Create chapter table for this book
 	echo "Creating chapter table... ";
-	createChapterTable($db, $book, $chaptersArray);
+	createChapterTable($mainDB, $book, $chaptersArray);
 	echo "done<br>";
 	// Create genres table and link it to the book
 	echo "Populating genres table... ";
-	populateGenresTable($book, $db);
+	populateGenresTable($book, $mainDB);
 	echo "done<br>";
 	// Write XML to disk
 	echo "Writing XML to disk... ";
 	$xml->save($grabbeddir . checkStringContent($book->title) . ".xml");
 	echo "done<br>";
 	$idx++;
-	if ($idx>30) break;
+	if ($idx>20) break;
 } 
 $bigCover->resetiterator();
-$combined = $bigCover->appendimages(FALSE);
-// Write appended image to file
-$combined->writeimage($coverdir . "cover.jpg");
-$db->close();
+try {
+	$combined = $bigCover->appendimages(FALSE);
+	// Write appended image to file
+	$combined->writeimage($coverdir . "cover.jpg");
+} catch (Exception $e) {
+	
+}
+$mainDB->close();
 
 echo "Main database created.<br>";
 ?>

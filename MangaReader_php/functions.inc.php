@@ -22,6 +22,14 @@ function createDB() {
 	return $db;
 }
 
+function createBookDB($bookdir) {
+	if ($db = new SQLite3($bookdir . 'book.db')) {
+		return $db;
+	} else {
+		die($err);
+	}
+}
+
 function getListHTML($url) {
 	$data = getPage($url);
 	return $data; 
@@ -208,7 +216,7 @@ function populateGenresTable(Book $book, SQLite3 $db) {
 		$linkID = $linkIDstmt->execute()->fetchArray();
 		
 		if ($linkID == FALSE) {
-			$stmt = @$db->prepare('INSERT INTO MangaReader_Genres_Link (genre_id, manga_id, version) VALUES (:genreID,:mangaID,1);');
+			$stmt = @$db->prepare('INSERT OR IGNORE INTO MangaReader_Genres_Link (genre_id, manga_id, version) VALUES (:genreID,:mangaID,1);');
 			$stmt->bindValue(":genreID", $genreID[0], SQLITE3_INTEGER);
 			$stmt->bindValue(":mangaID", $mangaID[0], SQLITE3_INTEGER);
 			$stmt->execute();
@@ -218,7 +226,8 @@ function populateGenresTable(Book $book, SQLite3 $db) {
 
 /** Global functions **/
  
-function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir) {
+function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir, 
+		SQLite3 $bookDB) {
 	// Analyze page
 	$pageInfo = new imagePageInfo();
 	$pageInfo = analyzePage($chapter->chapterURL, $chapter);
@@ -227,7 +236,7 @@ function downloadChapter($chapter, $xml, $xml_root, $tempdir, $savedir) {
 	// Create appended image
 	$bigImage = createBigImage($pageInfo->imageTempURL, 1,
 			$pageInfo->pageCount, $combined, $xml, $xml_root,
-			$chapter->chapterTitle, $tempdir);
+			$chapter->chapterTitle, $tempdir, $bookDB);
 	// Write appended image to file
 	$bigImage->writeimage($savedir . checkStringContent($chapter->chapterTitle) . ".jpg");
 }
@@ -242,6 +251,9 @@ function checkStringContent($string) {
 	$string = str_replace('"', "'", $string);
 	$string = str_replace(".", "_", $string);
 	$string = str_replace(" ", "_", $string);
+	$string = str_replace("+", "_", $string);
+	$string = str_replace("(", "_", $string);
+	$string = str_replace(")", "_", $string);
 	
 	return $string;
 }
@@ -405,6 +417,47 @@ function writeDims($xml, $im, $page, $prevDim, $xml_chapter) {
 	return $nextOffset;
 }
 
+function writeDimsDB(SQLite3 $bookDB, Imagick $im, $chapterName, $page, $prevDim) {
+	$dim = $im->getImageGeometry();
+	$width = $dim['width'];
+	$height = $dim['height'];
+	$offset = [
+	"x" => $prevDim["width"],
+	"y" => $prevDim["height"]
+	];
+// 	// Create xml nodes
+// 	$xml_page = $xml->createElement("page");
+// 	$xml_page_id = $xml->createElement("page_id", $page);
+// 	$xml_offsetX = $xml->createElement("offset_x", $offset["x"]);
+// 	$xml_offsetY = $xml->createElement("offset_y", $offset["y"]);
+// 	$xml_width = $xml->createElement("width", $width);
+// 	$xml_height = $xml->createElement("height", $height);
+// 	// Append all page dims and page_id to page node
+// 	$xml_page->appendChild($xml_page_id);
+// 	$xml_page->appendChild($xml_offsetX);
+// 	$xml_page->appendChild($xml_offsetY);
+// 	$xml_page->appendChild($xml_width);
+// 	$xml_page->appendChild($xml_height);
+// 	// Finally append all children to the main file
+// 	$xml_chapter->appendChild($xml_page);
+	
+	// Prepage DB statement and execute it
+	$stmt = $bookDB->prepare('INSERT OR IGNORE INTO `'. $chapterName .'`(pageNum, pageX, pageY, pageW, pageH) VALUES (:pageNum, :pageX, :pageY, :pageW, :pageH);');
+	$stmt->bindValue(":pageNum", $page, SQLITE3_INTEGER);
+	$stmt->bindValue(":pageX", $offset["x"], SQLITE3_INTEGER);
+	$stmt->bindValue(":pageY", $offset["y"], SQLITE3_INTEGER);
+	$stmt->bindValue(":pageW", $width, SQLITE3_INTEGER);
+	$stmt->bindValue(":pageH", $height, SQLITE3_INTEGER);
+	$stmt->execute();
+	// Now calculate next offset
+	$nextOffset = [
+		'width' => $dim["width"]+$offset["x"],
+		'height' => $offset["y"] // We're using horizontal stacking
+	];
+	
+	return $nextOffset;
+}
+
 /** 
  * Creates chapter node in xml object
  * 
@@ -429,6 +482,11 @@ function createChapter($xml, $xml_root, $chapterName) {
 	return $xml_chapter;
 }
 
+function createChapterDBTable($chapterName, SQLite3 $bookDB) {
+	$bookDB->query("CREATE TABLE IF NOT EXISTS `" . $chapterName . "`(`_id` INTEGER NOT NULL primary key autoincrement, 
+			`pageNum` INTEGER, `pageX` INTEGER, `pageY` INTEGER, `pageW` INTEGER, `pageH` INTEGER);");
+}
+
 /** Creates basic xml object
  * 
  *  @return DOMDocument
@@ -442,13 +500,34 @@ function createXML() {
 }
 
 /**
+ * Loads XML file
+ * 
+ * @param String $filePath <br>
+ * Path to file
+ * 
+ * @return DOMDocument
+ */
+function loadXML($filePath) {
+	$xml = new DOMDocument('1.0');
+	$xml->formatOutput = TRUE;
+	$xml->preserveWhiteSpace = FALSE;
+	
+	$fp = fopen($filePath, "rb") or die("cannot open file");
+	$str = fread($fp, filesize($filePath));
+	
+	$xml->loadXML($str) or die("Error");
+	
+	return $xml;
+}
+
+/**
  * Creates root node in XML object
  * 
  * @param DOMDocument $xml
  * 
  * @return DOMElement
  */
-function createXMLRoot($xml) {
+function createXMLRoot(DOMDocument $xml) {
 	// Create root xml node
 	$xml_root = $xml->createElement("root");
 	// Append it
@@ -535,10 +614,12 @@ function is_image($path)
  */
 function createBigImage($urlTemp, $minIdx, $maxIdx,
 		$combined, $xml, $xml_root, $chapterName,
-		$tempdir) {
+		$tempdir, SQLite3 $bookDB) {
 	$all = new Imagick();
+	createChapterDBTable($chapterName, $bookDB);
 	$xml_chapter = createChapter($xml, $xml_root, $chapterName);
 	$dim = ['width' => 0, 'height' => 0];
+	$dimDB = $dim;
 	for ($i = $minIdx; $i < $maxIdx+1; $i++) {
 		// Make temp file
 		$tempFile = $tempdir . $i . ".jpg";
@@ -553,6 +634,7 @@ function createBigImage($urlTemp, $minIdx, $maxIdx,
 			// Create Imagick object from image
 			$im = new Imagick("jpg:$tempFile");
 			// Write image xml data
+			$dimDB = writeDimsDB($bookDB, $im, $chapterName, $i, $dim); 
 			$dim = writeDims($xml, $im, $i, $dim, $xml_chapter);
 			// Append object into array
 			$all->addimage($im);
